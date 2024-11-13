@@ -38,4 +38,10 @@ A Telegram bot that helps you discover and share dance events, parties and cultu
 2. Generate Prisma Client: `npx prisma generate`
 3. Start the development server: `npm run dev` or `pnpm dev`
 
+### Todos
+
+- [ ] Add tests
+- [ ] Add Dockerfile for deployment
+- [ ] Edit events
+
 LICENSE MIT - see [LICENSE](LICENSE)
