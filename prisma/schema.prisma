@@ -4,6 +4,8 @@
 // Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
 // Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
 
+// prisma/schema.prisma
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -14,9 +16,9 @@ datasource db {
 }
 
 model Event {
-  id              String    @id @default(uuid())
+  id              String       @id @default(uuid())
   title           String
-  description     String    @db.Text
+  description     String       @db.Text
   date            DateTime
   endDate         DateTime
   category        String[]
@@ -25,9 +27,17 @@ model Event {
   submittedById   Int
   submittedBy     String
   location        String
-  approved        Boolean   @default(false)
+  status          EventStatus  @default(PENDING)
   rejectionReason String?
-  threadId        Int?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  messageId       Int?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+}
+
+enum EventStatus {
+  PENDING
+  APPROVED
+  EDITED_PENDING
+  EDITED_APPROVED
+  REJECTED
 }

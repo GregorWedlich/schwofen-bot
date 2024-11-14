@@ -1,6 +1,6 @@
-import { Event } from "@prisma/client";
-import { Context, SessionFlavor } from "grammy";
-import { ConversationFlavor } from "@grammyjs/conversations";
+import { Event } from '@prisma/client';
+import { ConversationFlavor } from '@grammyjs/conversations';
+import { Context, SessionFlavor } from 'grammy';
 
 interface SessionData {
   state?: string;
