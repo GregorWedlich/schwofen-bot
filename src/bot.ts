@@ -1,14 +1,15 @@
 import { config } from 'dotenv';
 config();
 
-import { Bot, session, InlineKeyboard, GrammyError, HttpError } from 'grammy';
+import { Bot, GrammyError, HttpError, InlineKeyboard, session } from 'grammy';
 import { conversations, createConversation } from '@grammyjs/conversations';
 
-import { MyContext } from './types/context';
+import { TELEGRAM_TOKEN } from './constants/constants';
 import { submitEventConversation } from './conversations/submitEventConversation';
 import { rejectEventConversation } from './conversations/rejectEventConversation';
 import { searchEventConversation } from './conversations/searchEventConversation';
-import { TELEGRAM_TOKEN } from './constants/constants';
+import { editEventConversation } from './conversations/editEventConversation';
+import { MyContext } from './types/context';
 import {
   handleEventApproval,
   handleEventRejection,
@@ -37,6 +38,7 @@ bot.use(conversations());
 bot.use(createConversation(submitEventConversation, 'submitEventConversation'));
 bot.use(createConversation(rejectEventConversation, 'rejectEventConversation'));
 bot.use(createConversation(searchEventConversation, 'searchEventConversation'));
+bot.use(createConversation(editEventConversation, 'editEventConversation'));
 
 // Register commands
 bot.command('einreichen', async (ctx) => {
@@ -51,6 +53,12 @@ bot.command('suchen', async (ctx) => {
   });
 });
 
+bot.command('bearbeiten', async (ctx) => {
+  await ctx.reply('Möchtest du eine deiner Veranstaltungen bearbeiten?', {
+    reply_markup: new InlineKeyboard().text('Ja', 'edit_event'),
+  });
+});
+
 bot.callbackQuery('submit_event', async (ctx) => {
   await ctx.answerCallbackQuery();
   await ctx.conversation.enter('submitEventConversation');
@@ -61,12 +69,21 @@ bot.callbackQuery('start_search', async (ctx) => {
   await ctx.conversation.enter('searchEventConversation');
 });
 
-bot.callbackQuery(/approve_(.+)/, async (ctx) => {
-  await handleEventApproval(ctx.match[1], ctx);
+bot.callbackQuery('edit_event', async (ctx) => {
+  await ctx.answerCallbackQuery();
+  await ctx.conversation.enter('editEventConversation');
 });
 
-bot.callbackQuery(/reject_(.+)/, async (ctx) => {
-  await handleEventRejection(ctx.match[1], ctx);
+bot.callbackQuery(/approve_(edit_)?(.+)/, async (ctx) => {
+  // const isEdit = ctx.match[1] === 'edit_';
+  const eventId = ctx.match[2];
+  await handleEventApproval(eventId, ctx);
+});
+
+bot.callbackQuery(/reject_(edit_)?(.+)/, async (ctx) => {
+  // const isEdit = ctx.match[1] === 'edit_';
+  const eventId = ctx.match[2];
+  await handleEventRejection(eventId, ctx);
 });
 
 // Debugging

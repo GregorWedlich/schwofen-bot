@@ -1,23 +1,37 @@
-import { de } from 'date-fns/locale';
-import { format } from 'date-fns';
+import { formatInTimeZone } from 'date-fns-tz';
 import { InputFile } from 'grammy';
 import { Readable } from 'stream';
 import { Event } from '@prisma/client';
 
-import { ADMIN_CHAT_ID, CHANNEL_USERNAME } from '../constants/constants';
 import { bot } from '../bot';
+import {
+  ADMIN_CHAT_ID,
+  CHANNEL_USERNAME,
+  TIMEZONE,
+  DATE_FORMAT,
+} from '../constants/constants';
+import { publishEvent } from '../controllers/eventController';
+import {
+  approveEvent,
+  approveEditedEvent,
+  findEventById,
+  updateEvent,
+} from '../models/eventModel';
+import { MyContext } from '../types/context';
+import { getLocale } from '../utils/localeUtils';
+import { ICONS } from '../utils/iconUtils';
 import {
   escapeMarkdownV2Text,
   escapeMarkdownV2Url,
 } from '../utils/markdownUtils';
-import { ICONS } from '../utils/iconUtils';
-import { MyContext } from '../types/context';
-import { findEventById, approveEvent } from '../models/eventModel';
-import { publishEvent } from '../controllers/eventController';
 
-export async function notifyAdminsOfEvent(event: Event) {
+const locale = getLocale();
+
+export async function notifyAdminsOfEvent(event: Event, isEdit = false) {
   const messageLines = [
-    `📢 *Neue Veranstaltung eingereicht:*`,
+    isEdit
+      ? `✏️ *Bearbeitete Veranstaltung zur Überprüfung:*`
+      : `📢 *Neue Veranstaltung eingereicht:*`,
     `*Von:* ${escapeMarkdownV2Text(event.submittedBy.toString())}`,
     `*Titel:* ${escapeMarkdownV2Text(event.title)}`,
   ];
@@ -28,13 +42,13 @@ export async function notifyAdminsOfEvent(event: Event) {
 
   messageLines.push(
     `*Datum Start:* ${escapeMarkdownV2Text(
-      format(event.date, 'dd.MM.yyyy HH:mm', { locale: de }),
+      formatInTimeZone(event.date, TIMEZONE, DATE_FORMAT, { locale }),
     )}`,
   );
 
   messageLines.push(
     `*Datum Ende:* ${escapeMarkdownV2Text(
-      format(event.endDate, 'dd.MM.yyyy HH:mm', { locale: de }),
+      formatInTimeZone(event.endDate, TIMEZONE, DATE_FORMAT, { locale }),
     )}`,
   );
 
@@ -64,8 +78,18 @@ export async function notifyAdminsOfEvent(event: Event) {
   const approveKeyboard = {
     inline_keyboard: [
       [
-        { text: 'Annehmen', callback_data: `approve_${event.id}` },
-        { text: 'Ablehnen', callback_data: `reject_${event.id}` },
+        {
+          text: 'Annehmen',
+          callback_data: isEdit
+            ? `approve_edit_${event.id}`
+            : `approve_${event.id}`,
+        },
+        {
+          text: 'Ablehnen',
+          callback_data: isEdit
+            ? `reject_edit_${event.id}`
+            : `reject_${event.id}`,
+        },
       ],
     ],
   };
@@ -98,7 +122,7 @@ export async function handleEventApproval(eventId: string, ctx: MyContext) {
       return;
     }
 
-    if (event.approved) {
+    if (event.status === 'APPROVED' || event.status === 'EDITED_APPROVED') {
       await ctx.answerCallbackQuery({
         text: 'Veranstaltung wurde bereits veröffentlicht.',
         show_alert: true,
@@ -106,7 +130,20 @@ export async function handleEventApproval(eventId: string, ctx: MyContext) {
       return;
     }
 
-    const approvedEvent = await approveEvent(eventId);
+    let approvedEvent: Event;
+
+    if (event.status === 'PENDING') {
+      approvedEvent = await approveEvent(eventId);
+    } else if (event.status === 'EDITED_PENDING') {
+      approvedEvent = await approveEditedEvent(eventId);
+    } else {
+      await ctx.answerCallbackQuery({
+        text: 'Unbekannter Status der Veranstaltung.',
+        show_alert: true,
+      });
+      return;
+    }
+
     await publishEvent(approvedEvent);
 
     const message = escapeMarkdownV2Text(
@@ -144,18 +181,20 @@ export async function handleEventRejection(eventId: string, ctx: MyContext) {
 export async function postEventToChannel(event: Event): Promise<void> {
   const messageLines = [
     `${ICONS.announcement} *${escapeMarkdownV2Text(event.title)}*`,
-    `${ICONS.location} *Location:* ${escapeMarkdownV2Text(event.location)}`,
+    `${ICONS.location} *Ort:* ${escapeMarkdownV2Text(event.location)}`,
     `${ICONS.date} *Start:* ${escapeMarkdownV2Text(
-      format(event.date, 'dd.MM.yyyy HH:mm', { locale: de }),
-    )}`,
+      formatInTimeZone(event.date, TIMEZONE, DATE_FORMAT, { locale }),
+    )}\n`,
     `${ICONS.date} *Ende:* ${escapeMarkdownV2Text(
-      format(event.endDate, 'dd.MM.yyyy HH:mm', { locale: de }),
-    )}`,
+      formatInTimeZone(event.endDate, TIMEZONE, DATE_FORMAT, { locale }),
+    )}\n`,
   ];
 
   if (event.category.length > 0) {
     messageLines.push(
-      `🏷 *Kategorie:* ${escapeMarkdownV2Text(event.category.join(', '))}`,
+      `${ICONS.category} *Kategorie:* ${escapeMarkdownV2Text(
+        event.category.join(', '),
+      )}`,
     );
   }
 
@@ -181,14 +220,106 @@ export async function postEventToChannel(event: Event): Promise<void> {
   if (event.imageBase64) {
     const imageBuffer = Buffer.from(event.imageBase64, 'base64');
     const stream = Readable.from(imageBuffer);
-    await bot.api.sendPhoto(CHANNEL_USERNAME, new InputFile(stream), {
-      caption: messageText,
-      parse_mode: 'MarkdownV2',
-    });
+
+    const sentMessage = await bot.api.sendPhoto(
+      CHANNEL_USERNAME,
+      new InputFile(stream),
+      {
+        caption: messageText,
+        parse_mode: 'MarkdownV2',
+      },
+    );
+
+    await updateEvent(event.id, { messageId: sentMessage.message_id });
   } else {
-    await bot.api.sendMessage(CHANNEL_USERNAME, messageText, {
-      parse_mode: 'MarkdownV2',
-    });
+    const sentMessage = await bot.api.sendMessage(
+      CHANNEL_USERNAME,
+      messageText,
+      {
+        parse_mode: 'MarkdownV2',
+      },
+    );
+
+    await updateEvent(event.id, { messageId: sentMessage.message_id });
+  }
+}
+
+export async function updateEventInChannel(event: Event): Promise<void> {
+  const messageLines = [
+    `${ICONS.announcement} *${escapeMarkdownV2Text(event.title)}*`,
+    `${ICONS.location} *Ort:* ${escapeMarkdownV2Text(event.location)}`,
+    `${ICONS.date} *Start:* ${escapeMarkdownV2Text(
+      formatInTimeZone(event.date, TIMEZONE, DATE_FORMAT, { locale }),
+    )}\n`,
+    `${ICONS.date} *Ende:* ${escapeMarkdownV2Text(
+      formatInTimeZone(event.endDate, TIMEZONE, DATE_FORMAT, { locale }),
+    )}\n`,
+  ];
+
+  if (event.category.length > 0) {
+    messageLines.push(
+      `${ICONS.category} *Kategorie:* ${escapeMarkdownV2Text(
+        event.category.join(', '),
+      )}`,
+    );
+  }
+
+  messageLines.push(
+    `${ICONS.description} *Beschreibung:* ${escapeMarkdownV2Text(
+      event.description,
+    )}`,
+  );
+
+  if (event.links && event.links.length > 0) {
+    const linksText = event.links
+      .map((link) => {
+        const escapedLinkText = escapeMarkdownV2Text(link);
+        const escapedLinkUrl = escapeMarkdownV2Url(link);
+        return `[${escapedLinkText}](${escapedLinkUrl})`;
+      })
+      .join('\n');
+    messageLines.push(`${ICONS.links} *Links:*\n${linksText}`);
+  }
+
+  const messageText = messageLines.join('\n');
+
+  if (event.imageBase64) {
+    const imageBuffer = Buffer.from(event.imageBase64, 'base64');
+    const stream = Readable.from(imageBuffer);
+
+    if (event.messageId) {
+      await bot.api.deleteMessage(CHANNEL_USERNAME, event.messageId);
+    }
+    const sentMessage = await bot.api.sendPhoto(
+      CHANNEL_USERNAME,
+      new InputFile(stream),
+      {
+        caption: messageText,
+        parse_mode: 'MarkdownV2',
+      },
+    );
+
+    await updateEvent(event.id, { messageId: sentMessage.message_id });
+  } else {
+    if (event.messageId) {
+      await bot.api.editMessageText(
+        CHANNEL_USERNAME,
+        event.messageId,
+        messageText,
+        {
+          parse_mode: 'MarkdownV2',
+        },
+      );
+    } else {
+      const sentMessage = await bot.api.sendMessage(
+        CHANNEL_USERNAME,
+        messageText,
+        {
+          parse_mode: 'MarkdownV2',
+        },
+      );
+      await updateEvent(event.id, { messageId: sentMessage.message_id });
+    }
   }
 }
 
@@ -215,10 +346,10 @@ export async function sendSearchToUser(
       event.location,
     )}\n`;
     message += `${ICONS.date} *Start:* ${escapeMarkdownV2Text(
-      format(event.date, 'dd.MM.yyyy HH:mm', { locale: de }),
+      formatInTimeZone(event.date, TIMEZONE, DATE_FORMAT, { locale }),
     )}\n`;
     message += `${ICONS.date} *Ende:* ${escapeMarkdownV2Text(
-      format(event.endDate, 'dd.MM.yyyy HH:mm', { locale: de }),
+      formatInTimeZone(event.endDate, TIMEZONE, DATE_FORMAT, { locale }),
     )}\n`;
 
     if (event.category.length > 0) {
