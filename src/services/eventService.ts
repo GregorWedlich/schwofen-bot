@@ -1,15 +1,9 @@
-import { formatInTimeZone } from 'date-fns-tz';
 import { InputFile } from 'grammy';
 import { Readable } from 'stream';
 import { Event } from '@prisma/client';
 
 import { bot } from '../bot';
-import {
-  ADMIN_CHAT_ID,
-  CHANNEL_USERNAME,
-  TIMEZONE,
-  DATE_FORMAT,
-} from '../constants/constants';
+import { ADMIN_CHAT_ID, CHANNEL_USERNAME } from '../constants/constants';
 import { publishEvent } from '../controllers/eventController';
 import {
   approveEvent,
@@ -18,63 +12,16 @@ import {
   updateEvent,
 } from '../models/eventModel';
 import { MyContext } from '../types/context';
-import { getLocale } from '../utils/localeUtils';
 import { ICONS } from '../utils/iconUtils';
-import {
-  escapeMarkdownV2Text,
-  escapeMarkdownV2Url,
-} from '../utils/markdownUtils';
-
-const locale = getLocale();
+import { escapeMarkdownV2Text } from '../utils/markdownUtils';
+import { formatEvent } from '../utils/eventMessageFormatter';
 
 export async function notifyAdminsOfEvent(event: Event, isEdit = false) {
-  const messageLines = [
-    isEdit
-      ? `✏️ *Bearbeitete Veranstaltung zur Überprüfung:*`
-      : `📢 *Neue Veranstaltung eingereicht:*`,
-    `*Von:* ${escapeMarkdownV2Text(event.submittedBy.toString())}`,
-    `*Titel:* ${escapeMarkdownV2Text(event.title)}`,
-  ];
+  const messageText = formatEvent(event, {
+    context: 'admin',
+    isEdit,
+  });
 
-  if (event.location) {
-    messageLines.push(`*Ort:* ${escapeMarkdownV2Text(event.location)}`);
-  }
-
-  messageLines.push(
-    `*Datum Start:* ${escapeMarkdownV2Text(
-      formatInTimeZone(event.date, TIMEZONE, DATE_FORMAT, { locale }),
-    )}`,
-  );
-
-  messageLines.push(
-    `*Datum Ende:* ${escapeMarkdownV2Text(
-      formatInTimeZone(event.endDate, TIMEZONE, DATE_FORMAT, { locale }),
-    )}`,
-  );
-
-  if (event.category) {
-    const categoryText = Array.isArray(event.category)
-      ? event.category.join(', ')
-      : event.category;
-    messageLines.push(`*Kategorie:* ${escapeMarkdownV2Text(categoryText)}`);
-  }
-
-  messageLines.push(
-    `*Beschreibung:* ${escapeMarkdownV2Text(event.description)}`,
-  );
-
-  if (event.links && event.links.length > 0) {
-    const linksText = event.links
-      .map((link) => {
-        const escapedLinkText = escapeMarkdownV2Text(link);
-        const escapedLinkUrl = escapeMarkdownV2Url(link);
-        return `[${escapedLinkText}](${escapedLinkUrl})`;
-      })
-      .join('\n');
-    messageLines.push(`*Links:*\n${linksText}`);
-  }
-
-  const messageText = messageLines.join('\n');
   const approveKeyboard = {
     inline_keyboard: [
       [
@@ -179,43 +126,9 @@ export async function handleEventRejection(eventId: string, ctx: MyContext) {
 }
 
 export async function postEventToChannel(event: Event): Promise<void> {
-  const messageLines = [
-    `${ICONS.announcement} *${escapeMarkdownV2Text(event.title)}*`,
-    `${ICONS.location} *Ort:* ${escapeMarkdownV2Text(event.location)}`,
-    `${ICONS.date} *Start:* ${escapeMarkdownV2Text(
-      formatInTimeZone(event.date, TIMEZONE, DATE_FORMAT, { locale }),
-    )}\n`,
-    `${ICONS.date} *Ende:* ${escapeMarkdownV2Text(
-      formatInTimeZone(event.endDate, TIMEZONE, DATE_FORMAT, { locale }),
-    )}\n`,
-  ];
-
-  if (event.category.length > 0) {
-    messageLines.push(
-      `${ICONS.category} *Kategorie:* ${escapeMarkdownV2Text(
-        event.category.join(', '),
-      )}`,
-    );
-  }
-
-  messageLines.push(
-    `${ICONS.description} *Beschreibung:* ${escapeMarkdownV2Text(
-      event.description,
-    )}`,
-  );
-
-  if (event.links && event.links.length > 0) {
-    const linksText = event.links
-      .map((link) => {
-        const escapedLinkText = escapeMarkdownV2Text(link);
-        const escapedLinkUrl = escapeMarkdownV2Url(link);
-        return `[${escapedLinkText}](${escapedLinkUrl})`;
-      })
-      .join('\n');
-    messageLines.push(`${ICONS.links} *Links:*\n${linksText}`);
-  }
-
-  const messageText = messageLines.join('\n');
+  const messageText = formatEvent(event, {
+    context: 'channel',
+  });
 
   if (event.imageBase64) {
     const imageBuffer = Buffer.from(event.imageBase64, 'base64');
@@ -245,43 +158,9 @@ export async function postEventToChannel(event: Event): Promise<void> {
 }
 
 export async function updateEventInChannel(event: Event): Promise<void> {
-  const messageLines = [
-    `${ICONS.announcement} *${escapeMarkdownV2Text(event.title)}*`,
-    `${ICONS.location} *Ort:* ${escapeMarkdownV2Text(event.location)}`,
-    `${ICONS.date} *Start:* ${escapeMarkdownV2Text(
-      formatInTimeZone(event.date, TIMEZONE, DATE_FORMAT, { locale }),
-    )}\n`,
-    `${ICONS.date} *Ende:* ${escapeMarkdownV2Text(
-      formatInTimeZone(event.endDate, TIMEZONE, DATE_FORMAT, { locale }),
-    )}\n`,
-  ];
-
-  if (event.category.length > 0) {
-    messageLines.push(
-      `${ICONS.category} *Kategorie:* ${escapeMarkdownV2Text(
-        event.category.join(', '),
-      )}`,
-    );
-  }
-
-  messageLines.push(
-    `${ICONS.description} *Beschreibung:* ${escapeMarkdownV2Text(
-      event.description,
-    )}`,
-  );
-
-  if (event.links && event.links.length > 0) {
-    const linksText = event.links
-      .map((link) => {
-        const escapedLinkText = escapeMarkdownV2Text(link);
-        const escapedLinkUrl = escapeMarkdownV2Url(link);
-        return `[${escapedLinkText}](${escapedLinkUrl})`;
-      })
-      .join('\n');
-    messageLines.push(`${ICONS.links} *Links:*\n${linksText}`);
-  }
-
-  const messageText = messageLines.join('\n');
+  const messageText = formatEvent(event, {
+    context: 'channel',
+  });
 
   if (event.imageBase64) {
     const imageBuffer = Buffer.from(event.imageBase64, 'base64');
@@ -290,6 +169,7 @@ export async function updateEventInChannel(event: Event): Promise<void> {
     if (event.messageId) {
       await bot.api.deleteMessage(CHANNEL_USERNAME, event.messageId);
     }
+
     const sentMessage = await bot.api.sendPhoto(
       CHANNEL_USERNAME,
       new InputFile(stream),
@@ -331,47 +211,20 @@ export async function sendSearchToUser(
   if (events.length === 0) {
     await bot.api.sendMessage(
       chatId,
-      `Keine Veranstaltungen für ${escapeMarkdownV2Text(dateText)}\\.`,
+      `Keine Veranstaltungen für ${escapeMarkdownV2Text(dateText)}.`,
       { parse_mode: 'MarkdownV2' },
     );
     return;
   }
 
   for (const [index, event] of events.entries()) {
-    let message = `${ICONS.date} *Veranstaltung ${index + 1}/${
-      events.length
-    }*\n\n`;
-    message += `${ICONS.announcement} *${escapeMarkdownV2Text(event.title)}*\n`;
-    message += `${ICONS.location} *Location:* ${escapeMarkdownV2Text(
-      event.location,
-    )}\n`;
-    message += `${ICONS.date} *Start:* ${escapeMarkdownV2Text(
-      formatInTimeZone(event.date, TIMEZONE, DATE_FORMAT, { locale }),
-    )}\n`;
-    message += `${ICONS.date} *Ende:* ${escapeMarkdownV2Text(
-      formatInTimeZone(event.endDate, TIMEZONE, DATE_FORMAT, { locale }),
-    )}\n`;
-
-    if (event.category.length > 0) {
-      message += `${ICONS.category} *Kategorie:* ${escapeMarkdownV2Text(
-        event.category.join(', '),
-      )}\n`;
-    }
-
-    message += `${ICONS.description} *Beschreibung:* ${escapeMarkdownV2Text(
-      event.description,
-    )}\n`;
-
-    if (event.links && event.links.length > 0) {
-      message += `\n${ICONS.links} *Links:*\n`;
-      message += event.links
-        .map((link) => {
-          const escapedLinkText = escapeMarkdownV2Text(link);
-          const escapedLinkUrl = escapeMarkdownV2Url(link);
-          return `[${escapedLinkText}](${escapedLinkUrl})`;
-        })
-        .join('\n');
-    }
+    const message = formatEvent(event, {
+      context: 'user',
+      index,
+      total: events.length,
+      includeIndex: true,
+      dateText,
+    });
 
     if (event.imageBase64) {
       const imageBuffer = Buffer.from(event.imageBase64, 'base64');
